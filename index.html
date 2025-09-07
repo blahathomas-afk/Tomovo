@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tomova hlasovací apka</title>
+    <title>Tomova hlasovací aplikace</title>
     <style>
         * {
             margin: 0;
@@ -345,17 +345,69 @@
         .poll-link label {
             color: #333;
         }
+
+        /* Nový styl pro rychlé zadání jména */
+        .quick-name-input {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .quick-name-modal {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.3);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .quick-name-modal h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+
+        .quick-name-modal input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 18px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .quick-name-modal input:focus {
+            outline: none;
+            border-color: #3f51b5;
+        }
+
+        .manual-entry {
+            margin-top: 15px;
+            color: #666;
+            cursor: pointer;
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🗳️ Tomova hlasovací apka</h1>
-            
+            <h1>🗳️ Hlasovací aplikace</h1>
+            <p>Jednoduché hlasování pro váš tým</p>
         </div>
         
         <div class="content">
-            <div class="tab-buttons">
+            <div class="tab-buttons" id="tabButtons">
                 <button class="tab-button active" onclick="showTab('create')">Vytvořit hlasování</button>
                 <button class="tab-button" onclick="showTab('vote')">Hlasovat</button>
                 <button class="tab-button" onclick="showTab('results')">Výsledky</button>
@@ -407,11 +459,6 @@
             <!-- Hlasování -->
             <div id="vote" class="tab-content">
                 <div id="votingForm">
-                    <div class="voter-name">
-                        <label>Vaše jméno:</label>
-                        <input type="text" id="voterName" placeholder="Zadejte své jméno">
-                    </div>
-                    
                     <div id="pollInfo">
                         <p>Pro hlasování zadejte ID hlasování nebo použijte odkaz zaslaný kolegou.</p>
                         <div class="form-group">
@@ -425,6 +472,11 @@
                         <div class="poll-header">
                             <div class="poll-title" id="votePollTitle"></div>
                             <div class="poll-description" id="votePollDescription"></div>
+                        </div>
+                        
+                        <div class="voter-name">
+                            <label>Vaše jméno:</label>
+                            <input type="text" id="voterName" placeholder="Zadejte své jméno">
                         </div>
                         
                         <div id="votingOptions"></div>
@@ -459,6 +511,16 @@
             </div>
         </div>
     </div>
+
+    <!-- Modal pro rychlé zadání jména -->
+    <div id="quickNameInput" class="quick-name-input" style="display:none;">
+        <div class="quick-name-modal">
+            <h3>Zadejte své jméno</h3>
+            <input type="text" id="quickVoterName" placeholder="Vaše jméno" maxlength="50">
+            <button type="button" class="btn btn-primary" onclick="submitQuickName()">Pokračovat k hlasování</button>
+            <div class="manual-entry" onclick="closeQuickNameInput()">Zadám ručně později</div>
+        </div>
+    </div>
     
     <script>
         // Globální proměnné
@@ -475,9 +537,11 @@
             const urlParams = new URLSearchParams(window.location.search);
             const pollId = urlParams.get('poll');
             if (pollId) {
+                // Skrýt záložky a rovnou zobrazit hlasování
+                document.getElementById('tabButtons').style.display = 'none';
                 document.getElementById('pollId').value = pollId;
                 showTab('vote');
-                loadPoll();
+                loadPollDirect(pollId);
             }
         };
         
@@ -491,7 +555,101 @@
             
             // Zobrazit vybranou záložku
             document.getElementById(tabName).classList.add('active');
-            event.target.classList.add('active');
+            if (event && event.target) {
+                event.target.classList.add('active');
+            } else {
+                // Najdi správné tlačítko podle názvu záložky
+                const buttonMap = {
+                    'create': 0,
+                    'vote': 1,
+                    'results': 2
+                };
+                const buttonIndex = buttonMap[tabName];
+                if (buttonIndex !== undefined) {
+                    buttons[buttonIndex].classList.add('active');
+                }
+            }
+        }
+
+        function loadPollDirect(pollId) {
+            if (!polls[pollId]) {
+                // Zobrazit chybovou zprávu
+                document.getElementById('pollInfo').innerHTML = `
+                    <div class="error-message">
+                        Hlasování s ID "${pollId}" nebylo nalezeno.<br>
+                        Možná bylo smazáno nebo zadáno špatné ID.
+                    </div>
+                `;
+                return;
+            }
+
+            currentPollId = pollId;
+            const poll = polls[pollId];
+            
+            // Zkontrolovat, jestli uživatel už nehlasoval (podle localStorage)
+            const hasVoted = localStorage.getItem(`voted_${pollId}`);
+            if (hasVoted) {
+                showVoteSuccess();
+                return;
+            }
+
+            // Zobrazit informace o hlasování
+            document.getElementById('votePollTitle').textContent = poll.title;
+            document.getElementById('votePollDescription').textContent = poll.description || '';
+            
+            // Vytvořit možnosti hlasování
+            const optionsContainer = document.getElementById('votingOptions');
+            optionsContainer.innerHTML = '';
+            
+            poll.options.forEach((option, index) => {
+                const optionDiv = document.createElement('div');
+                optionDiv.className = 'voting-option';
+                optionDiv.textContent = option;
+                optionDiv.onclick = () => selectOption(option, optionDiv);
+                optionsContainer.appendChild(optionDiv);
+            });
+            
+            // Skrýt pole pro zadání ID a zobrazit hlasování
+            document.getElementById('pollInfo').style.display = 'none';
+            document.getElementById('pollDetails').style.display = 'block';
+
+            // Zobrazit modal pro zadání jména
+            document.getElementById('quickNameInput').style.display = 'flex';
+            document.getElementById('quickVoterName').focus();
+            
+            // Umožnit Enter pro potvrzení
+            document.getElementById('quickVoterName').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    submitQuickName();
+                }
+            });
+        }
+
+        function submitQuickName() {
+            const name = document.getElementById('quickVoterName').value.trim();
+            if (!name) {
+                alert('Zadejte prosím své jméno');
+                return;
+            }
+            
+            // Zkontrolovat, jestli už někdo s tímto jménem nehlasoval
+            if (polls[currentPollId].votes[name]) {
+                alert('Někdo s tímto jménem už hlasoval. Zadejte prosím jiné jméno.');
+                return;
+            }
+            
+            document.getElementById('voterName').value = name;
+            document.getElementById('quickNameInput').style.display = 'none';
+        }
+
+        function closeQuickNameInput() {
+            document.getElementById('quickNameInput').style.display = 'none';
+        }
+
+        function showVoteSuccess() {
+            document.getElementById('pollInfo').style.display = 'none';
+            document.getElementById('pollDetails').style.display = 'none';
+            document.getElementById('voteSuccess').style.display = 'block';
         }
         
         function addOption() {
@@ -578,33 +736,7 @@
         
         function loadPoll() {
             const pollId = document.getElementById('pollId').value.trim();
-            
-            if (!pollId || !polls[pollId]) {
-                alert('Hlasování s tímto ID neexistuje!');
-                return;
-            }
-            
-            currentPollId = pollId;
-            const poll = polls[pollId];
-            
-            // Zobrazení informací o hlasování
-            document.getElementById('votePollTitle').textContent = poll.title;
-            document.getElementById('votePollDescription').textContent = poll.description || '';
-            
-            // Vytvoření možností hlasování
-            const optionsContainer = document.getElementById('votingOptions');
-            optionsContainer.innerHTML = '';
-            
-            poll.options.forEach((option, index) => {
-                const optionDiv = document.createElement('div');
-                optionDiv.className = 'voting-option';
-                optionDiv.textContent = option;
-                optionDiv.onclick = () => selectOption(option, optionDiv);
-                optionsContainer.appendChild(optionDiv);
-            });
-            
-            document.getElementById('pollInfo').style.display = 'none';
-            document.getElementById('pollDetails').style.display = 'block';
+            loadPollDirect(pollId);
         }
         
         function selectOption(option, element) {
@@ -636,8 +768,10 @@
                 polls[currentPollId].votes[voterName] = selectedOption;
                 localStorage.setItem('votingPolls', JSON.stringify(polls));
                 
-                document.getElementById('pollDetails').style.display = 'none';
-                document.getElementById('voteSuccess').style.display = 'block';
+                // Označit, že uživatel hlasoval (podle prohlížeče)
+                localStorage.setItem(`voted_${currentPollId}`, 'true');
+                
+                showVoteSuccess();
             } else {
                 alert('Už jste hlasoval/a v tomto hlasování!');
             }
@@ -715,6 +849,4 @@
         }, 5000);
     </script>
 </body>
-
 </html>
-
